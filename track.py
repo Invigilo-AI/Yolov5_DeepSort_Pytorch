@@ -63,8 +63,8 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
 
 
 def detect(opt, save_img=False):
-    out, source, weights, view_img, save_txt, imgsz = \
-        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    out, output_filename, source, weights, view_img, save_txt, imgsz = \
+        opt.output, opt.output_filename, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source == '0' or source.startswith(
         'rtsp') or source.startswith('http') or source.endswith('.txt')
 
@@ -79,15 +79,17 @@ def detect(opt, save_img=False):
 
     # Initialize
     device = select_device(opt.device)
-    if os.path.exists(out):
-        shutil.rmtree(out)  # delete output folder
-    os.makedirs(out)  # make new output folder
+    #if os.path.exists(out):
+    #    shutil.rmtree(out)  # delete output folder
+    #os.makedirs(out)  # make new output folder
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
     model = torch.load(weights, map_location=device)[
         'model'].float()  # load to FP32
     model.to(device).eval()
+    print(f"TRACK_LOGGER: {weights} loaded to {device}")
+
     if half:
         model.half()  # to FP16
 
@@ -114,6 +116,7 @@ def detect(opt, save_img=False):
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
 
+    avg_time = 0
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -183,26 +186,26 @@ def detect(opt, save_img=False):
                         with open(txt_path, 'a') as f:
                             f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                            bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format
-
             else:
                 deepsort.increment_ages()
 
             # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
+            #print('%sDone. (%.3fs)' % (s, t2 - t1))
+            avg_time = (avg_time * (frame_idx) + (t2 - t1))/(frame_idx+1)
 
             # Stream results
-            if view_img:
-                cv2.imshow(p, im0)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
+            #if view_img:
+            #    cv2.imshow(p, im0)
+            #    if cv2.waitKey(1) == ord('q'):  # q to quit
+            #        raise StopIteration
 
             # Save results (image with detections)
             if save_img:
-                print('saving img!')
+                #print('saving img!')
                 if dataset.mode == 'images':
                     cv2.imwrite(save_path, im0)
                 else:
-                    print('saving video!')
+                    #print('saving video!')
                     if vid_path != save_path:  # new video
                         vid_path = save_path
                         if isinstance(vid_writer, cv2.VideoWriter):
@@ -211,16 +214,21 @@ def detect(opt, save_img=False):
                         fps = vid_cap.get(cv2.CAP_PROP_FPS)
                         w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                         h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                        if output_filename:
+                            save_path = os.path.join(out,output_filename)
+                            print(f'Writing output to : {save_path}')
                         vid_writer = cv2.VideoWriter(
                             save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
                     vid_writer.write(im0)
 
     if save_txt or save_img:
+        #print('Results saved to %s' % os.getcwd() + os.sep + out)
         print('Results saved to %s' % os.getcwd() + os.sep + out)
         if platform == 'darwin':  # MacOS
             os.system('open ' + save_path)
 
-    print('Done. (%.3fs)' % (time.time() - t0))
+    print('Done. Total frames : (%d). Total time : (%.3fs). Average detection time per frame: (%.3fs)' % (frame_idx+1, time.time() - t0, avg_time))
 
 
 if __name__ == '__main__':
@@ -232,6 +240,8 @@ if __name__ == '__main__':
                         default='inference/images', help='source')
     parser.add_argument('--output', type=str, default='inference/output',
                         help='output folder')  # output folder
+    parser.add_argument('--output_filename', type=str, default='default.mp4',
+                        help='output file name')
     parser.add_argument('--img-size', type=int, default=640,
                         help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float,
